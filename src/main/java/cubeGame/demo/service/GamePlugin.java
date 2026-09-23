@@ -3,7 +3,10 @@ package cubeGame.demo.service;
 import fr.le_campus_numerique.square_games.engine.Game;
 import fr.le_campus_numerique.square_games.engine.IntRange;
 
+import java.util.Collection;
+import java.util.List;
 import java.util.Locale;
+import java.util.UUID;
 
 public interface GamePlugin {
 
@@ -19,6 +22,7 @@ public interface GamePlugin {
      * @return the translated game name
      */
     String getName(Locale locale);
+
 
     /**
      * Returns the default name of the game for the platform default locale.
@@ -53,18 +57,21 @@ public interface GamePlugin {
      * Creates a new game instance without systematically requiring all parameters.
      * If playerCount or boardSize is null, plugin defaults will be used.
      *
-     * @param playerCount optional player count (nullable)
      * @param boardSize   optional board size (nullable)
      * @return the newly instantiated Game
      */
-    Game createGame(Integer playerCount, Integer boardSize);
+    Game createGame(Collection<UUID> playerIds, Integer boardSize);
 
-    /**
-     * Creates a new game instance with all default parameters.
-     *
-     * @return the newly instantiated Game
-     */
+    default Game createGame(Integer playerCount, Integer boardSize) {
+        int count = (playerCount != null) ? playerCount : getDefaultPlayerCount();
+        java.util.List<UUID> ids = new java.util.ArrayList<>();
+        for (int i = 0; i < count; i++) {
+            ids.add(UUID.randomUUID());
+        }
+        return createGame(ids, boardSize);
+    }
+
     default Game createGame() {
-        return createGame(null, null);
+        return createGame((Integer) null, null);
     }
 }

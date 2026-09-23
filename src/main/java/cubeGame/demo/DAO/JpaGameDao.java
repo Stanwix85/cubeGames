@@ -4,8 +4,10 @@ import cubeGame.demo.DAO.entities.GameEntity;
 import cubeGame.demo.DAO.entities.GameTokenEntity;
 import fr.le_campus_numerique.square_games.engine.CellPosition;
 import fr.le_campus_numerique.square_games.engine.Game;
+import fr.le_campus_numerique.square_games.engine.GameFactory;
 import fr.le_campus_numerique.square_games.engine.GameStatus;
 import fr.le_campus_numerique.square_games.engine.Token;
+import fr.le_campus_numerique.square_games.engine.TokenPosition;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Repository;
@@ -20,10 +22,22 @@ public class JpaGameDao implements GameDao {
 
     private final GameEntityRepository repository;
     private final Map<UUID, Game> activeGamesCache = new ConcurrentHashMap<>();
+    private final Map<String, GameFactory> factories = new HashMap<>();
 
     @Autowired
-    public JpaGameDao(GameEntityRepository repository) {
+    public JpaGameDao(GameEntityRepository repository, List<GameFactory> factoryList) {
         this.repository = repository;
+        if (factoryList != null) {
+            for (GameFactory factory : factoryList) {
+                this.factories.put(factory.getGameFactoryId().toLowerCase(), factory);
+                if (factory.getGameFactoryId().equalsIgnoreCase("15 puzzle")) {
+                    this.factories.put("taquin", factory);
+                }
+                if (factory.getGameFactoryId().equalsIgnoreCase("connect4")) {
+                    this.factories.put("connectfour", factory);
+                }
+            }
+        }
     }
 
     @Override
@@ -142,15 +156,47 @@ public class JpaGameDao implements GameDao {
 
     private Game toDomain(GameEntity entity) {
         UUID gameId = UUID.fromString(entity.id);
-        GameStatus status = entity.status != null ? entity.status : GameStatus.ONGOING;
-        UUID currentPlayer = entity.currentPlayerId != null ? UUID.fromString(entity.currentPlayerId) : null;
 
-        Set<UUID> players = (entity.playerIds != null && !entity.playerIds.isBlank())
+        List<UUID> playersList = (entity.playerIds != null && !entity.playerIds.isBlank())
                 ? Arrays.stream(entity.playerIds.split(","))
                 .filter(s -> !s.isBlank())
                 .map(UUID::fromString)
-                .collect(Collectors.toSet())
-                : Collections.emptySet();
+                .toList()
+                : Collections.emptyList();
+
+        List<TokenPosition<UUID>> boardTokens = new ArrayList<>();
+        List<TokenPosition<UUID>> removedTokens = new ArrayList<>();
+
+        if (entity.tokens != null) {
+            for (GameTokenEntity tokenEntity : entity.tokens) {
+                UUID ownerId = tokenEntity.ownerId != null ? UUID.fromString(tokenEntity.ownerId) : null;
+                if (tokenEntity.removed) {
+                    removedTokens.add(new TokenPosition<>(ownerId, tokenEntity.name, 0, 0));
+                } else if (tokenEntity.x != null && tokenEntity.y != null) {
+                    boardTokens.add(new TokenPosition<>(ownerId, tokenEntity.name, tokenEntity.x, tokenEntity.y));
+                }
+            }
+        }
+
+        String factoryKey = entity.factoryId != null ? entity.factoryId.trim().toLowerCase() : "tictactoe";
+        GameFactory factory = factories.get(factoryKey);
+        if (factory == null && factoryKey.contains("tictac")) {
+            factory = factories.get("tictactoe");
+        }
+
+        if (factory != null && !playersList.isEmpty()) {
+            try {
+                Game restored = factory.createGameWithIds(gameId, entity.boardSize, playersList, boardTokens, removedTokens);
+                activeGamesCache.put(gameId, restored);
+                return restored;
+            } catch (Exception ignored) {
+            }
+        }
+
+        GameStatus status = entity.status != null ? entity.status : GameStatus.ONGOING;
+        UUID currentPlayer = entity.currentPlayerId != null ? UUID.fromString(entity.currentPlayerId) : null;
+
+        Set<UUID> players = new LinkedHashSet<>(playersList);
 
         Map<CellPosition, Token> board = new HashMap<>();
         List<Token> remaining = new ArrayList<>();
